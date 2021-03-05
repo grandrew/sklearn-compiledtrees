@@ -2,20 +2,30 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
+from numpy.lib.arraysetops import isin
 
 import six
 
 from sklearn.base import RegressorMixin, ClassifierMixin
-from sklearn.tree.tree import DecisionTreeRegressor, DecisionTreeClassifier, DTYPE, DOUBLE
-from sklearn.ensemble.gradient_boosting import GradientBoostingRegressor, GradientBoostingClassifier
-from sklearn.ensemble.forest import ForestRegressor, ForestClassifier
+from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+from sklearn.neighbors._typedefs import DTYPE
+from numpy import float64 as DOUBLE
+from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestRegressor as ForestRegressor
+from sklearn.ensemble import RandomForestClassifier as ForestClassifier
 from sklearn.utils import deprecated
 
-from compiledtrees import _compiled
-from compiledtrees import code_gen as cg
-import numpy as np
-
 import platform
+
+from sklearn.utils.validation import _num_samples
+
+if platform.python_implementation() == "PyPy":
+    from compiledtrees import _native as _compiled
+    from compiledtrees import code_gen_native as cg
+else:
+    from compiledtrees import _compiled
+    from compiledtrees import code_gen as cg
+import numpy as np
 
 if platform.system() == 'Windows':
     delete_files = False
@@ -287,24 +297,31 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
         y: array of shape = [n_samples, n_classes]
             The predicted probabilities.
         """
-        if not X.flags['C_CONTIGUOUS']:
-            X = np.ascontiguousarray(X)
-        if X.dtype != DTYPE:
-            X = X.astype(DTYPE)
-        if X.ndim != 2:
-            raise ValueError(
-                "Input must be 2-dimensional (n_samples, n_features), "
-                "not {}".format(X.shape))
+        if not isinstance(X, list):
+            if not X.flags['C_CONTIGUOUS']:
+                X = np.ascontiguousarray(X)
+            if X.dtype != DTYPE:
+                X = X.astype(DTYPE)
+            if X.ndim != 2:
+                raise ValueError(
+                    "Input must be 2-dimensional (n_samples, n_features), "
+                    "not {}".format(X.shape))
 
-        n_samples, n_features = X.shape
+            n_samples, n_features = X.shape
+        else:
+            n_samples = len(X)
+            n_features = len(X[0])
         if self._n_features != n_features:
             raise ValueError("Number of features of the model must "
                              " match the input. Model n_features is {} and "
                              " input n_features is {}".format(
                                  self._n_features, n_features))
 
-        all_probas = np.zeros((n_samples, len(self.classes_)), dtype=DOUBLE)
-        self._evaluator.predict_proba(X, all_probas)
+        if isinstance(X, list):
+            all_probas = [[0.0] * len(self.classes_)] * n_samples
+        else:
+            all_probas = np.zeros((n_samples, len(self.classes_)), dtype=DOUBLE)
+        self._evaluator.predict_proba(X, all_probas, num_samples=n_samples)
 
         if n_samples == 1:
             return all_probas[0]

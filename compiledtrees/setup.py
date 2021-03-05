@@ -2,6 +2,7 @@ import os
 
 import numpy
 from numpy.distutils.misc_util import Configuration
+import platform
 
 
 def configuration(parent_package="", top_path=None):
@@ -9,12 +10,13 @@ def configuration(parent_package="", top_path=None):
     libraries = []
     if os.name == 'posix':
         libraries.append('m')
-    config.add_extension("_compiled",
-                         sources=["_compiled.c"],
-                         include_dirs=[numpy.get_include()],
-                         libraries=libraries,
-                         extra_link_args=["-Wl,--allow-multiple-definition"],
-                         extra_compile_args=["-O3", "-Wno-unused-function"])
+    if platform.python_implementation() != "PyPy":
+        config.add_extension("_compiled",
+                            sources=["_compiled.c"],
+                            include_dirs=[numpy.get_include()],
+                            libraries=libraries,
+                            extra_link_args=["-Wl,--allow-multiple-definition"],
+                            extra_compile_args=["-O3", "-Wno-unused-function"])
     config.add_subpackage("tests")
     return config
 
