@@ -284,7 +284,7 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
                         for e in np.asarray(clf.estimators_).flat))
         return False
 
-    def predict_proba(self, X):
+    def predict_proba(self, X, _output=None):
         """Predict probability for invdividual classes for X.
 
         Parameters
@@ -309,24 +309,30 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
 
             n_samples, n_features = X.shape
         else:
-            n_samples = len(X)
-            n_features = len(X[0])
+            if isinstance(X[0], list):
+                n_samples = len(X)
+                n_features = len(X[0])
+            else:
+                n_samples = -1
+                n_features = len(X)
+                _output = [0.0] * len(self.classes_)
         if self._n_features != n_features:
             raise ValueError("Number of features of the model must "
                              " match the input. Model n_features is {} and "
                              " input n_features is {}".format(
                                  self._n_features, n_features))
 
-        if isinstance(X, list):
-            all_probas = [[0.0] * len(self.classes_)] * n_samples
-        else:
-            all_probas = np.zeros((n_samples, len(self.classes_)), dtype=DOUBLE)
-        self._evaluator.predict_proba(X, all_probas, num_samples=n_samples)
+        if _output is None:
+            if isinstance(X, list):
+                _output = [[0.0] * len(self.classes_)] * n_samples
+            else:
+                _output = np.zeros((n_samples, len(self.classes_)), dtype=DOUBLE)
+        self._evaluator.predict_proba(X, _output, num_samples=n_samples)
 
         if n_samples == 1:
-            return all_probas[0]
+            return _output[0]
         else:
-            return all_probas
+            return _output 
 
     def predict(self, X):
         """Predict classes for X.
