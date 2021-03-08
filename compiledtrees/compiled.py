@@ -19,12 +19,17 @@ import platform
 
 from sklearn.utils.validation import _num_samples
 
-if platform.python_implementation() == "PyPy":
-    from compiledtrees import _native as _compiled
-    from compiledtrees import code_gen_native as cg
-else:
-    from compiledtrees import _compiled
+try:
+    import cffi
+    from compiledtrees import _compiled_ffi as _compiled
     from compiledtrees import code_gen as cg
+except ImportError:
+    if platform.python_implementation() == "PyPy":
+        from compiledtrees import _native as _compiled
+        from compiledtrees import code_gen_native as cg
+    else:
+        from compiledtrees import _compiled
+        from compiledtrees import code_gen as cg
 import numpy as np
 
 if platform.system() == 'Windows':
@@ -34,7 +39,14 @@ else:
 
 class BaseCompiledPredictor(object):
     """Common functionality for both regressor and classfier"""
-    def __init__(self, clf, n_jobs=-1):
+    def __init__(self, clf, n_jobs=-1, out_sz=2):
+        if type(clf) == str:  # a file to load
+            # you know what you're doing, so skip every check
+            import compiledtrees._compiled_ffi
+            self._evaluator =\
+                compiledtrees._compiled_ffi.CompiledClassifier(clf, "evaluate", out_sz)
+            self._n_features = -1
+            return
         self._n_features, self._evaluator, self._so_f_object = self._build(clf, n_jobs)
         self._so_f = self._so_f_object.name
 
@@ -55,6 +67,11 @@ class BaseCompiledPredictor(object):
         if platform.system() == 'Windows':
             self._so_f_object.close()
         self._n_features = state["n_features"]
+    
+    def save(self, filename):
+        import shutil
+        shutil.copy(self._so_f, filename)
+
 
 
 class CompiledRegressionPredictor(BaseCompiledPredictor, RegressorMixin):
@@ -213,7 +230,7 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
         http://crsouza.blogspot.com/2012/01/decision-trees-in-c.html
         """
         super(CompiledClassifierPredictor, self).__init__(clf, n_jobs)
-        self.classes_ = clf.classes_
+        if type(clf) != str: self.classes_ = clf.classes_
 
     def __getstate__(self):
         state = super(CompiledClassifierPredictor, self).__getstate__()
@@ -315,8 +332,9 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
             else:
                 n_samples = -1
                 n_features = len(X)
-                _output = [0.0] * len(self.classes_)
-        if self._n_features != n_features:
+                # _output = [0.0] * len(self.classes_)
+                _output = -1
+        if self._n_features > 0 and self._n_features != n_features:
             raise ValueError("Number of features of the model must "
                              " match the input. Model n_features is {} and "
                              " input n_features is {}".format(
@@ -327,7 +345,10 @@ class CompiledClassifierPredictor(BaseCompiledPredictor, ClassifierMixin):
                 _output = [[0.0] * len(self.classes_)] * n_samples
             else:
                 _output = np.zeros((n_samples, len(self.classes_)), dtype=DOUBLE)
-        self._evaluator.predict_proba(X, _output, num_samples=n_samples)
+        if _output == -1:
+            return self._evaluator.predict_proba(X, _output, num_samples=n_samples)
+        else:
+            self._evaluator.predict_proba(X, _output, num_samples=n_samples)
 
         if n_samples == 1:
             return _output[0]
